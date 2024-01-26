@@ -405,6 +405,42 @@ func (p *PostgresRepo) getTickerName(ctx context.Context, tickerID int) (string,
 	return ticker, nil
 }
 
+func (p *PostgresRepo) TruncateBalances(ctx context.Context) error {
+	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(ctx, "TRUNCATE balances")
+	if err != nil {
+		return rollbackTx(tx, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (p *PostgresRepo) TruncateTransactions(ctx context.Context) error {
+	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(ctx, "TRUNCATE transactions")
+	if err != nil {
+		return rollbackTx(tx, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (p *PostgresRepo) Close() error {
 	return p.db.Close()
 }

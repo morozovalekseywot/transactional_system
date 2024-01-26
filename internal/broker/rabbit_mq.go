@@ -117,6 +117,7 @@ func (b *RabbitMQ) SendSuccess(ctx context.Context, d *amqp.Delivery) {
 	b.SendResponse(ctx, resp, d)
 }
 
+// SendResponse отправляет сообщение с body = bytes
 func (b *RabbitMQ) SendResponse(ctx context.Context, bytes []byte, d *amqp.Delivery) {
 	err := b.ch.PublishWithContext(ctx,
 		"",        // exchange
@@ -134,6 +135,7 @@ func (b *RabbitMQ) SendResponse(ctx context.Context, bytes []byte, d *amqp.Deliv
 	log.Printf("Send response to: %s with body: %s", d.ReplyTo, bytes)
 }
 
+// RunConsumer запускает ещё одного обработчика запросов, приходящих через брокера
 func (b *RabbitMQ) RunConsumer(ctx context.Context, invoiceOp, withDrawOp, BalanceOp func(context.Context, *amqp.Delivery)) {
 	b.wg.Add(1)
 	go func() {

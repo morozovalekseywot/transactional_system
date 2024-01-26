@@ -1,11 +1,12 @@
-package repository
+package helpers
 
 import (
+	"bwg_transactional_system/internal/repository"
 	"context"
 	"fmt"
 )
 
-func FillTestData(repo Repository) error {
+func FillTestData(repo repository.Repository) error {
 	ctx := context.Background()
 	tickers := []string{"USD", "RUB", "EUR", "USDT"}
 	for _, t := range tickers {
