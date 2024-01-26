@@ -26,11 +26,11 @@ type Broker interface {
 type ErrorResponse struct {
 	Operation string `json:"operation"`
 	Code      int    `json:"code"`
-	Reason    error  `json:"reason"`
+	Reason    string `json:"reason"`
 }
 
 type SuccessResponse struct {
 	Operation string `json:"operation"`
 	Code      int    `json:"code"`
-	Body      []byte `json:"body,omitempty"`
+	Body      string `json:"body,omitempty"`
 }

@@ -191,7 +191,7 @@ func (p *PostgresRepo) Invoice(ctx context.Context, req *models.InvoiceRequest) 
 		return err
 	}
 
-	tx, err := p.db.BeginTx(ctx, nil)
+	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return err
 	}
@@ -249,7 +249,7 @@ func (p *PostgresRepo) WithDraw(ctx context.Context, req *models.WithdrawRequest
 		return err
 	}
 
-	tx, err := p.db.BeginTx(ctx, nil)
+	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return err
 	}
@@ -312,15 +312,6 @@ func (p *PostgresRepo) WithDraw(ctx context.Context, req *models.WithdrawRequest
 	return nil
 }
 
-func (p *PostgresRepo) getTickerName(ctx context.Context, tickerID int) (string, error) {
-	var ticker string
-	if err := p.db.QueryRowContext(ctx, "SELECT name FROM tickers WHERE ticker_id = $1", tickerID).Scan(&ticker); err != nil {
-		return "", err
-	}
-
-	return ticker, nil
-}
-
 /*
 1) Открываем транзакцию на чтение
 
@@ -335,92 +326,83 @@ func (p *PostgresRepo) getTickerName(ctx context.Context, tickerID int) (string,
 6) Формируем вывод из ответа бд
 */
 func (p *PostgresRepo) GetBalance(ctx context.Context, req *models.GetBalanceRequest) (*models.GetBalanceResponse, error) {
-	readTx, err := p.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return nil, err
-	}
-
 	// проверяем то что нужный кошелёк существует
 	var wID int
-	if err := readTx.QueryRowContext(ctx, "SELECT wallet_id FROM wallets WHERE wallet_id = $1", req.WalletID).Scan(&wID); err != nil {
+	if err := p.db.QueryRowContext(ctx, "SELECT wallet_id FROM wallets WHERE wallet_id = $1", req.WalletID).Scan(&wID); err != nil {
 		if err == sql.ErrNoRows {
-			return nil, rollbackTx(readTx, WalletDoesntExist(req.WalletID))
+			return nil, WalletDoesntExist(req.WalletID)
 		}
 
-		return nil, rollbackTx(readTx, err)
+		return nil, err
 	}
 
 	// получаем актуальный баланс кошелька из таблицы balances
-	balanceRows, err := readTx.QueryContext(ctx, "SELECT ticker_id, amount FROM balances WHERE wallet_id = $1", req.WalletID)
+	balanceRows, err := p.db.QueryContext(ctx, "SELECT ticker_id, amount FROM balances WHERE wallet_id = $1", req.WalletID)
 	if err != nil {
-		return nil, rollbackTx(readTx, err)
+		return nil, err
 	}
 	defer balanceRows.Close()
 
-	// получаем список замороженных транзакцией из таблицы transactions
-	frozenRows, err := readTx.QueryContext(ctx,
-		"SELECT ticker_id, amount FROM transactions WHERE wallet_id = $1 AND status = $2", req.WalletID, models.TransactionStatusCreated)
+	actualBalance, err := p.readRows(ctx, balanceRows)
 	if err != nil {
-		return nil, rollbackTx(readTx, err)
-	}
-	defer frozenRows.Close()
-
-	// чтение может занять много времени, поэтому завершаем транзакцию сразу, чтобы не замедлять работу
-	if err := readTx.Commit(); err != nil {
 		return nil, err
 	}
 
-	// Заполняем актуальный баланс
-	actualBalance := make(map[string]float32)
-	for balanceRows.Next() {
-		var tickerID int
-		var amount float32
-		if err != balanceRows.Scan(&tickerID, &amount) {
-			return nil, err
-		}
-
-		// Представим что тикеров много и мы не может сохранить их все в словарь в оперативной памяти чтобы сконвертировать ID в название
-		if ticker, err := p.getTickerName(ctx, tickerID); err != nil {
-			return nil, err
-		} else {
-			actualBalance[ticker] = amount
-		}
+	// получаем список замороженных транзакцией из таблицы transactions
+	frozenRows, err := p.db.QueryContext(ctx,
+		"SELECT ticker_id, amount FROM transactions WHERE wallet_id = $1 AND status = $2", req.WalletID, models.TransactionStatusCreated)
+	if err != nil {
+		return nil, err
 	}
-
-	if err := balanceRows.Err(); err != nil {
-		return nil, fmt.Errorf("error encountered while iterating over balance rows: %s", err)
-	}
+	defer frozenRows.Close()
 
 	// Теперь заполняем замороженные средства
-	frozenBalance := make(map[string]float32)
-	for frozenRows.Next() {
-		var tickerID int
-		var amount float32
-		if err != frozenRows.Scan(&tickerID, &amount) {
-			return nil, err
-		}
-
-		// Представим что тикеров много и мы не может сохранить их все в словарь в оперативной памяти чтобы сконвертировать ID в название
-		if ticker, err := p.getTickerName(ctx, tickerID); err != nil {
-			return nil, err
-		} else {
-			// один и тот же тикер может встречаться в разных транзакциях, если он уже был, то надо добавить к нему учёт новой транзакции
-			if v, ok := frozenBalance[ticker]; ok {
-				frozenBalance[ticker] = v + amount
-			} else {
-				frozenBalance[ticker] = amount
-			}
-		}
-	}
-
-	if err := frozenRows.Err(); err != nil {
-		return nil, fmt.Errorf("error encountered while iterating over transaction rows: %s", err)
+	frozenBalance, err := p.readRows(ctx, frozenRows)
+	if err != nil {
+		return nil, err
 	}
 
 	return &models.GetBalanceResponse{
 		ActualBalance: actualBalance,
 		FrozenBalance: frozenBalance,
 	}, nil
+}
+
+func (p *PostgresRepo) readRows(ctx context.Context, rows *sql.Rows) (map[string]float32, error) {
+	balance := make(map[string]float32)
+	for rows.Next() {
+		var tickerID int
+		var amount float32
+		if err := rows.Scan(&tickerID, &amount); err != nil {
+			return nil, err
+		}
+
+		// Представим что тикеров много и мы не может сохранить их все в словарь в оперативной памяти чтобы сконвертировать ID в название
+		if ticker, err := p.getTickerName(ctx, tickerID); err != nil {
+			return nil, err
+		} else {
+			if v, ok := balance[ticker]; ok {
+				balance[ticker] = v + amount
+			} else {
+				balance[ticker] = amount
+			}
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error encountered while iterating over balance rows: %s", err)
+	}
+
+	return balance, nil
+}
+
+func (p *PostgresRepo) getTickerName(ctx context.Context, tickerID int) (string, error) {
+	var ticker string
+	if err := p.db.QueryRowContext(ctx, "SELECT name FROM tickers WHERE ticker_id = $1", tickerID).Scan(&ticker); err != nil {
+		return "", err
+	}
+
+	return ticker, nil
 }
 
 func (p *PostgresRepo) Close() error {

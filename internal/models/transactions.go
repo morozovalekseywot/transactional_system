@@ -63,6 +63,6 @@ type GetBalanceRequest struct {
 }
 
 type GetBalanceResponse struct {
-	ActualBalance map[string]float32 `json:"actual_balance"`
-	FrozenBalance map[string]float32 `json:"frozen_balance"`
+	ActualBalance map[string]float32 `json:"actual_balance,omitempty"`
+	FrozenBalance map[string]float32 `json:"frozen_balance,omitempty"`
 }

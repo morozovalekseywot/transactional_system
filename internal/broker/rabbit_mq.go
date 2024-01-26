@@ -107,7 +107,7 @@ func NewRabbitMQ(cfg *Config) (*RabbitMQ, error) {
 
 // SendError отправляет ответ с ошибкой связанной с неправильными данными в запросе
 func (b *RabbitMQ) SendError(ctx context.Context, err error, d *amqp.Delivery) {
-	resp, _ := json.Marshal(ErrorResponse{Code: http.StatusBadRequest, Reason: err, Operation: d.RoutingKey})
+	resp, _ := json.Marshal(ErrorResponse{Code: http.StatusBadRequest, Reason: err.Error(), Operation: d.RoutingKey})
 	b.SendResponse(ctx, resp, d)
 }
 
@@ -119,10 +119,10 @@ func (b *RabbitMQ) SendSuccess(ctx context.Context, d *amqp.Delivery) {
 
 func (b *RabbitMQ) SendResponse(ctx context.Context, bytes []byte, d *amqp.Delivery) {
 	err := b.ch.PublishWithContext(ctx,
-		ExchangeName, // exchange
-		d.ReplyTo,    // routing key
-		false,        // mandatory
-		false,        // immediate
+		"",        // exchange
+		d.ReplyTo, // routing key
+		false,     // mandatory
+		false,     // immediate
 		amqp.Publishing{
 			ContentType:   "application/json",
 			CorrelationId: d.CorrelationId,
@@ -131,6 +131,7 @@ func (b *RabbitMQ) SendResponse(ctx context.Context, bytes []byte, d *amqp.Deliv
 	if err != nil {
 		log.Printf("Error when publish message: %v", err)
 	}
+	log.Printf("Send response to: %s with body: %s", d.ReplyTo, bytes)
 }
 
 func (b *RabbitMQ) RunConsumer(ctx context.Context, invoiceOp, withDrawOp, BalanceOp func(context.Context, *amqp.Delivery)) {
@@ -140,7 +141,7 @@ func (b *RabbitMQ) RunConsumer(ctx context.Context, invoiceOp, withDrawOp, Balan
 		for {
 			select {
 			case d := <-b.msgs:
-				log.Printf("Get message, roting key: %s, body: %s", d.RoutingKey, d.Body)
+				log.Printf("Get message, routing key: %s, body: %s", d.RoutingKey, d.Body)
 				switch Operation(d.RoutingKey) {
 				case OpInvoice:
 					invoiceOp(ctx, &d)
@@ -174,70 +175,3 @@ func (b *RabbitMQ) Close() error {
 
 	return nil
 }
-
-/*
-func (b *RabbitMQ) InvoiceOperation(ctx context.Context, repo repository.Repository, d *amqp.Delivery) {
-	req := models.InvoiceRequest{}
-	if err := json.Unmarshal(d.Body, &req); err != nil {
-		b.SendError(ctx, err, d)
-		return
-	}
-	if err := req.Validate(); err != nil {
-		b.SendError(ctx, err, d)
-		return
-	}
-	err := repo.Invoice(ctx, &req)
-
-	b.processError(ctx, err, d)
-}
-
-func (b *RabbitMQ) WithdrawOperation(ctx context.Context, repo repository.Repository, d *amqp.Delivery) {
-	req := models.WithdrawRequest{}
-	if err := json.Unmarshal(d.Body, &req); err != nil {
-		b.SendError(ctx, err, d)
-		return
-	}
-	if err := req.Validate(); err != nil {
-		b.SendError(ctx, err, d)
-		return
-	}
-	err := repo.WithDraw(ctx, &req)
-	b.processError(ctx, err, d)
-}
-
-func (b *RabbitMQ) processError(ctx context.Context, err error, d *amqp.Delivery) {
-	if err != nil {
-		var e repository.LogicErrors
-		switch {
-		case errors.As(err, &e):
-			b.SendError(ctx, e, d)
-		default:
-			body, _ := json.Marshal(ErrorResponse{Code: http.StatusInternalServerError, Reason: err, Operation: d.RoutingKey})
-			b.SendResponse(ctx, body, d)
-		}
-	} else {
-		b.SendSuccess(ctx, d)
-	}
-}
-
-func (b *RabbitMQ) GetBalanceOperation(ctx context.Context, repo repository.Repository, d *amqp.Delivery) {
-	req := models.GetBalanceRequest{}
-	if err := json.Unmarshal(d.Body, &req); err != nil {
-		b.SendError(ctx, err, d)
-		return
-	}
-	resp, err := repo.GetBalance(ctx, &req)
-	if err != nil {
-		body, _ := json.Marshal(ErrorResponse{Code: http.StatusInternalServerError, Reason: err, Operation: d.RoutingKey})
-		b.SendResponse(ctx, body, d)
-		return
-	}
-	bytes, _ := json.Marshal(resp)
-	body, _ := json.Marshal(SuccessResponse{
-		Operation: d.RoutingKey,
-		Code:      http.StatusOK,
-		Body:      bytes,
-	})
-	b.SendResponse(ctx, body, d)
-}
-*/

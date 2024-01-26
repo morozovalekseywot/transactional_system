@@ -52,7 +52,7 @@ func (a *App) invoiceOperation(ctx context.Context, d *amqp.Delivery) {
 
 	// отправляем запрос в базу данных
 	err := a.Repo.Invoice(ctx, &req)
-	a.processError(ctx, err, d)
+	a.processResult(ctx, err, d)
 }
 
 func (a *App) withdrawOperation(ctx context.Context, d *amqp.Delivery) {
@@ -68,17 +68,17 @@ func (a *App) withdrawOperation(ctx context.Context, d *amqp.Delivery) {
 
 	// отправляем запрос в базу данных
 	err := a.Repo.WithDraw(ctx, &req)
-	a.processError(ctx, err, d)
+	a.processResult(ctx, err, d)
 }
 
-func (a *App) processError(ctx context.Context, err error, d *amqp.Delivery) {
+func (a *App) processResult(ctx context.Context, err error, d *amqp.Delivery) {
 	if err != nil {
 		var e repository.LogicErrors
 		switch {
 		case errors.As(err, &e):
 			a.Broker.SendError(ctx, e, d)
 		default:
-			body, _ := json.Marshal(broker.ErrorResponse{Code: http.StatusInternalServerError, Reason: err, Operation: d.RoutingKey})
+			body, _ := json.Marshal(broker.ErrorResponse{Code: http.StatusInternalServerError, Reason: err.Error(), Operation: d.RoutingKey})
 			a.Broker.SendResponse(ctx, body, d)
 		}
 	} else {
@@ -96,15 +96,14 @@ func (a *App) getBalanceOperation(ctx context.Context, d *amqp.Delivery) {
 	// отправляем запрос в базу данных
 	resp, err := a.Repo.GetBalance(ctx, &req)
 	if err != nil {
-		body, _ := json.Marshal(broker.ErrorResponse{Code: http.StatusInternalServerError, Reason: err, Operation: d.RoutingKey})
-		a.Broker.SendResponse(ctx, body, d)
+		a.processResult(ctx, err, d)
 		return
 	}
 	bytes, _ := json.Marshal(resp)
 	body, _ := json.Marshal(broker.SuccessResponse{
 		Operation: d.RoutingKey,
 		Code:      http.StatusOK,
-		Body:      bytes,
+		Body:      string(bytes),
 	})
 	a.Broker.SendResponse(ctx, body, d)
 }

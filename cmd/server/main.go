@@ -99,7 +99,7 @@ func runProducer(cfg *broker.Config) {
 
 	ctx := context.Background()
 	log.Print("Begin producing messages")
-	n := 10
+	n := 4
 	invoiceIDs := set.New[string](n)
 	for i := 0; i < n; i++ {
 		id := uuid.NewString()
@@ -120,7 +120,6 @@ func runProducer(cfg *broker.Config) {
 
 	log.Print("Wait for invoice's responses")
 	for d := range msgs {
-		log.Printf("Some message: %s", d.Body)
 		if invoiceIDs.Contains(d.CorrelationId) {
 			log.Printf("Message: %s", d.Body)
 			invoiceIDs.Remove(d.CorrelationId)
@@ -141,7 +140,7 @@ func runProducer(cfg *broker.Config) {
 			ContentType:   "application/json",
 			CorrelationId: withDrawID,
 			ReplyTo:       q.Name,
-			Body:          newWithdraw(1, "USD", 3),
+			Body:          newWithdraw(1, "USD", 50),
 		})
 	failOnError(err, "Failed to publish a message")
 
@@ -162,7 +161,7 @@ func runProducer(cfg *broker.Config) {
 		false,                       // immediate
 		amqp.Publishing{
 			ContentType:   "application/json",
-			CorrelationId: withDrawID,
+			CorrelationId: balanceID,
 			ReplyTo:       q.Name,
 			Body:          newBalance(1),
 		})
@@ -175,6 +174,7 @@ func runProducer(cfg *broker.Config) {
 			break
 		}
 	}
+	log.Print("All responses received")
 }
 
 func main() {
