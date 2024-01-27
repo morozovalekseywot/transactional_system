@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS balances
 (
     wallet_id integer references wallets (wallet_id),
     ticker_id integer references tickers (ticker_id),
-    amount    double precision CHECK (amount > 0) NOT NULL,
+    amount    double precision CHECK (amount >= 0) NOT NULL,
     PRIMARY KEY (wallet_id, ticker_id)
 );
 

@@ -41,7 +41,7 @@ func (req *InvoiceRequest) Validate() error {
 }
 
 // Withdraw -> человек выводит средства со своего баланса по валюте, с параметрами в теле
-// код валюты, количество средств, номер кошелька или карты куда зачисляются средства.
+// код валюты, количество средств, номер кошелька или карты откуда снимаются средства.
 type WithdrawRequest struct {
 	WalletID int     `json:"wallet_id"`
 	Ticker   string  `json:"ticker"`

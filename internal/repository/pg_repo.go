@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS balances
 (
     wallet_id integer references wallets (wallet_id),
     ticker_id integer references tickers (ticker_id),
-    amount    double precision CHECK (amount > 0) NOT NULL,
+    amount    double precision CHECK (amount >= 0) NOT NULL,
     PRIMARY KEY (wallet_id, ticker_id)
 );
 
@@ -313,17 +313,13 @@ func (p *PostgresRepo) WithDraw(ctx context.Context, req *models.WithdrawRequest
 }
 
 /*
-1) Открываем транзакцию на чтение
+1) Проверяем то что нужный кошелёк существует
 
-2) Проверяем то что нужный кошелёк существует
+2) Получаем актуальный баланс кошелька из таблицы balances
 
-3) Получаем актуальный баланс кошелька из таблицы balances
+3) Получаем список замороженных транзакцией из таблицы transactions (со статусом models.TransactionStatusCreated)
 
-4) Получаем список замороженных транзакцией из таблицы transactions (со статусом models.TransactionStatusCreated)
-
-5) Завершаем транзакцию на чтение
-
-6) Формируем вывод из ответа бд
+4) Формируем вывод из ответа бд
 */
 func (p *PostgresRepo) GetBalance(ctx context.Context, req *models.GetBalanceRequest) (*models.GetBalanceResponse, error) {
 	// проверяем то что нужный кошелёк существует

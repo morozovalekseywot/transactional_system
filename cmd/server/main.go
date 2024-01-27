@@ -59,7 +59,7 @@ func main() {
 
 	server := app.NewApp(postgresRepo, rabbit)
 	// запускаем 4 обработчика сообщений
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 10; i++ {
 		server.RunConsumer(ctx)
 	}
 	log.Print("App started, consume messages")
