@@ -2,11 +2,10 @@ package broker
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
-	"net/http"
 	"sync"
 )
 
@@ -105,18 +104,6 @@ func NewRabbitMQ(cfg *Config) (*RabbitMQ, error) {
 	}, nil
 }
 
-// SendError отправляет ответ с ошибкой связанной с неправильными данными в запросе
-func (b *RabbitMQ) SendError(ctx context.Context, err error, d *amqp.Delivery) {
-	resp, _ := json.Marshal(ErrorResponse{Code: http.StatusBadRequest, Reason: err.Error(), Operation: d.RoutingKey})
-	b.SendResponse(ctx, resp, d)
-}
-
-// SendError отправляет сообщение с успешным результатом операции
-func (b *RabbitMQ) SendSuccess(ctx context.Context, d *amqp.Delivery) {
-	resp, _ := json.Marshal(SuccessResponse{Code: http.StatusOK, Operation: d.RoutingKey})
-	b.SendResponse(ctx, resp, d)
-}
-
 // SendResponse отправляет сообщение с body = bytes
 func (b *RabbitMQ) SendResponse(ctx context.Context, bytes []byte, d *amqp.Delivery) {
 	err := b.ch.PublishWithContext(ctx,
@@ -152,7 +139,7 @@ func (b *RabbitMQ) RunConsumer(ctx context.Context, invoiceOp, withDrawOp, Balan
 				case OpGetBalance:
 					BalanceOp(ctx, &d)
 				default:
-					b.SendError(ctx, fmt.Errorf("no such operation: %s", d.RoutingKey), &d)
+					b.SendResponse(ctx, NewBadRequestResponse(&d, fmt.Errorf("no such operation: %s", d.RoutingKey)), &d)
 				}
 
 				d.Ack(false)
@@ -165,7 +152,14 @@ func (b *RabbitMQ) RunConsumer(ctx context.Context, invoiceOp, withDrawOp, Balan
 
 func (b *RabbitMQ) Close() error {
 	// stop reader
-	close(b.stop)
+	select {
+	case _, open := <-b.stop:
+		if open {
+			return errors.New("has message in channel, which using for stop goroutines")
+		}
+	default:
+		close(b.stop)
+	}
 	b.wg.Wait()
 
 	if err := b.ch.Close(); err != nil {

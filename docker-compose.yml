@@ -31,6 +31,14 @@ services:
       - "5672"
       - "15672"
 
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    restart: always
+
   app:
     env_file:
       - .env
@@ -40,10 +48,11 @@ services:
     volumes:
       - .:/app
     ports:
-      - "8080:8000"
+      - "9000:9000"
     depends_on:
       - db
       - rabbitmq
+      - prometheus
     restart: unless-stopped
 
 volumes:

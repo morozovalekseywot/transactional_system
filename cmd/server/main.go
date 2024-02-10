@@ -6,12 +6,16 @@ import (
 	"bwg_transactional_system/internal/helpers"
 	"bwg_transactional_system/internal/repository"
 	"context"
-	"time"
-
+	"errors"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 func main() {
@@ -57,21 +61,48 @@ func main() {
 		log.Fatalf("Can't truncate transactions: %v", err)
 	}
 
-	server := app.NewApp(postgresRepo, rabbit)
-	// запускаем 4 обработчика сообщений
+	transactionalApp := app.NewApp(postgresRepo, rabbit)
+	// запускаем 10 обработчиков сообщений
 	for i := 0; i < 10; i++ {
-		server.RunConsumer(ctx)
+		transactionalApp.RunConsumer(ctx)
 	}
 	log.Print("App started, consume messages")
 
-	// if err := helpers.FillTestData(server.Repo); err != nil {
-	// 	log.Fatalf("Cant't fill test data: %v", err)
+	serverAddr := ":" + os.Getenv("SERVER_PORT")
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	server := &http.Server{
+		Addr:    serverAddr,
+		Handler: mux,
+	}
+
+	go func() {
+		if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+		log.Println("Stopped serving new connections.")
+	}()
+
+	// if err := helpers.FillTestData(transactionalApp.Repo); err != nil {
+	// 	log.Fatalf("Can't fill test data: %v", err)
 	// }
 
+	time.Sleep(time.Second)
 	helpers.RunTest2(brokerCfg) // только для тестирования
-	time.Sleep(30 * time.Minute)
-	if err := server.Close(); err != nil {
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan // wait ctrl + c
+
+	shutdownCtx, shutdownRelease := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownRelease()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Fatalf("HTTP shutdown error: %v", err)
+	}
+
+	if err := transactionalApp.Close(); err != nil {
 		log.Fatalf("Can't stop app: %v", err)
 	}
-	log.Print("Stop app")
+	log.Println("Graceful shutdown complete.")
 }
